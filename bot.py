@@ -5,9 +5,9 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import pandas as pd
 
-# Вставьте сюда токен вашего бота от @BotFather
-TOKEN = "8816812279:AAFImASlU6K7RsSPHP7ONRSEWjAMo4MpB0w"
-EXCEL_FILE = "current_schedule.xlsx"  # Имя файла, куда бот сохраняет расписание из чата
+# Бот автоматически берет токен из защищенных настроек Render (BOT_TOKEN)
+TOKEN = os.getenv("BOT_TOKEN")
+EXCEL_FILE = "current_schedule.xlsx"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
