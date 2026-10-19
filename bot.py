@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import pandas as pd
 
-# Бот автоматически берет токен из защищенных настроек Render (BOT_TOKEN)
+# Бот берет токен из защищенных настроек Render (BOT_TOKEN)
 TOKEN = os.getenv("BOT_TOKEN")
 EXCEL_FILE = "current_schedule.xlsx"
 
@@ -57,13 +57,24 @@ def load_schedule_for_group_5301():
             "lessons": [],
         }
 
-      time_str = str(time_val).strip() if pd.notna(time_val) else ""
+      # Заменяем точки на двоеточие во времени (например, 14.45-16.05 -> 14:45-16:05)
+      time_str = (
+          str(time_val)
+          .strip()
+          .replace(".", ":")
+          .replace("–", "-")
+          if pd.notna(time_val)
+          else ""
+      )
       subj_str = str(subject).strip().replace("\n", " ")
       aud_str = str(aud).strip() if pd.notna(aud) else "—"
 
-      schedule_data[day_key]["lessons"].append(
-          (f"{pair_num} пара ({time_str})", subj_str, aud_str)
-      )
+      schedule_data[day_key]["lessons"].append({
+          "num": pair_num,
+          "time": time_str,
+          "subject": subj_str,  # Полное название предмета и тип занятия
+          "aud": aud_str,
+      })
 
   return schedule_data
 
@@ -82,14 +93,16 @@ def build_keyboard(active_day="понедельник", show_teachers=False):
   builder = InlineKeyboardBuilder()
   SCHEDULE = load_schedule_for_group_5301()
 
+  # Кнопки выбора дней недели
   for code, label, _ in DAYS_ORDER:
     if code in SCHEDULE:
       if code == active_day:
-        builder.button(text=f"📌 {label}", callback_data=f"day_{code}")
+        builder.button(text=f"📌 {label} (Выбран)", callback_data=f"day_{code}")
       else:
         builder.button(text=label, callback_data=f"day_{code}")
-  builder.adjust(5)
+  builder.adjust(3, 3)  # По 3 кнопки в ряду
 
+  # Кнопка преподавателей
   if active_day in SCHEDULE:
     if show_teachers:
       builder.button(
@@ -105,42 +118,32 @@ def build_keyboard(active_day="понедельник", show_teachers=False):
   return builder.as_markup()
 
 
-def format_message(active_day="понедельник", show_teachers=False):
+def format_single_day_message(active_day="понедельник", show_teachers=False):
+  """Формирует сообщение ТОЛЬКО для выбранного дня (без лишних дней)."""
   SCHEDULE = load_schedule_for_group_5301()
-  text = "📚 **Неделя 19 октября – 25 октября**\n_обновлено автоматически_\n\n"
 
-  for code, label, date_str in DAYS_ORDER:
-    if code not in SCHEDULE:
-      continue
+  if active_day not in SCHEDULE:
+    return "📚 **Расписание группы 5301**\nВыберите день недели ниже:"
 
-    day_info = SCHEDULE[code]
-    lessons_count = len(day_info["lessons"])
+  day_info = SCHEDULE[active_day]
+  text = (
+      f"📚 **Неделя 19 октября – 25 октября**\n\n📅 **{day_info['title']}**"
+      f" ({day_info['date']})\n"
+      f"────────────────────────\n"
+  )
 
-    if code == active_day:
-      text += f"▲ **👉 {label}, {date_str} · {lessons_count} пары**\n\n"
-      text += "```\n"
-      text += "┌──────────────────────┬──────────────────────────────┬──────┐\n"
-      text += "│      Пара/Время      │           Предмет            │ Ауд. │\n"
-      text += "├──────────────────────┼──────────────────────────────┼──────┤\n"
-      for time_slot, subject, room in day_info["lessons"]:
-        subj_trunc = (
-            (subject[:27] + "…") if len(subject) > 28 else subject
-        )
-        text += (
-            f"│ {time_slot:<20} │ {subj_trunc:<28} │ {room:<4} │\n"
-        )
-      text += "└──────────────────────┴──────────────────────────────┴──────┘\n"
-      text += "```\n"
+  # Список пар (вертикальный формат — идеально для телефона, ничего не режется)
+  for item in day_info["lessons"]:
+    text += (
+        f"🔹 **{item['num']} пара** (`{item['time']}`)\n"
+        f"📖 {item['subject']}\n"
+        f"📍 Ауд: `{item['aud']}`\n\n"
+    )
 
-      if show_teachers:
-        text += "▲ 👩‍🏫 **Преподаватели:**\n"
-        for _, subject, _ in day_info["lessons"]:
-          text += f"• {subject}\n"
-        text += "\n"
-      else:
-        text += "▼ 👩‍🏫 Преподаватели\n\n"
-    else:
-      text += f"▼ {label}, {date_str} · {lessons_count} пары\n\n"
+  if show_teachers:
+    text += "────────────────────────\n👩‍🏫 **Список преподавателей:**\n"
+    for item in day_info["lessons"]:
+      text += f"• {item['subject']}\n"
 
   return text
 
@@ -168,7 +171,10 @@ async def handle_docs(message: types.Message):
 
 @dp.message(Command("start", "schedule"))
 async def cmd_start(message: types.Message):
-  text = format_message(active_day="понедельник", show_teachers=False)
+  # По умолчанию при старте показываем понедельник
+  text = format_single_day_message(
+      active_day="понедельник", show_teachers=False
+  )
   await message.answer(
       text,
       reply_markup=build_keyboard(
@@ -181,7 +187,7 @@ async def cmd_start(message: types.Message):
 @dp.callback_query(F.data.startswith("day_"))
 async def switch_day(callback: types.CallbackQuery):
   day_code = callback.data.split("_")[1]
-  text = format_message(active_day=day_code, show_teachers=False)
+  text = format_single_day_message(active_day=day_code, show_teachers=False)
   await callback.message.edit_text(
       text,
       reply_markup=build_keyboard(active_day=day_code, show_teachers=False),
@@ -193,7 +199,7 @@ async def switch_day(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("show_tch_"))
 async def show_teachers(callback: types.CallbackQuery):
   day_code = callback.data.split("_")[2]
-  text = format_message(active_day=day_code, show_teachers=True)
+  text = format_single_day_message(active_day=day_code, show_teachers=True)
   await callback.message.edit_text(
       text,
       reply_markup=build_keyboard(active_day=day_code, show_teachers=True),
@@ -205,7 +211,7 @@ async def show_teachers(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("hide_tch_"))
 async def hide_teachers(callback: types.CallbackQuery):
   day_code = callback.data.split("_")[2]
-  text = format_message(active_day=day_code, show_teachers=False)
+  text = format_single_day_message(active_day=day_code, show_teachers=False)
   await callback.message.edit_text(
       text,
       reply_markup=build_keyboard(active_day=day_code, show_teachers=False),
@@ -215,7 +221,7 @@ async def hide_teachers(callback: types.CallbackQuery):
 
 
 async def main():
-  print("Автономный облачный бот запущен!")
+  print("Оптимизированный мобильный бот запущен!")
   await dp.start_polling(bot)
 
 
