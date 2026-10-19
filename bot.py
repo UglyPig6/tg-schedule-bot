@@ -9,7 +9,17 @@ import pandas as pd
 
 # Бот берет токен из защищенных настроек Render (BOT_TOKEN)
 TOKEN = os.getenv("BOT_TOKEN")
-EXCEL_FILE = "current_schedule.xlsx"
+
+
+def find_excel_file():
+  """Автоматически находит файл расписания .xlsx в папке."""
+  for f in os.listdir("."):
+    if f.endswith(".xlsx") and not f.startswith("~$"):
+      return f
+  return "current_schedule.xlsx"
+
+
+EXCEL_FILE = find_excel_file()
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -36,11 +46,12 @@ threading.Thread(target=run_web_server, daemon=True).start()
 
 
 def load_schedule_for_group_5301():
-  """Парсит актуальный Excel-файл для группы 5301."""
-  if not os.path.exists(EXCEL_FILE):
+  """Парсит актуальный Excel-файл для группы 5301 с поддержкой общих аудиторий."""
+  current_file = find_excel_file()
+  if not os.path.exists(current_file):
     return {}
 
-  df = pd.read_excel(EXCEL_FILE, sheet_name="2 курс ")
+  df = pd.read_excel(current_file, sheet_name="2 курс ")
 
   group_col_idx = None
   header_row = df.iloc[4].values
@@ -68,7 +79,18 @@ def load_schedule_for_group_5301():
       current_day = str(day_val).strip()
 
     subject = row.iloc[group_col_idx]
-    aud = row.iloc[group_col_idx + 1] if group_col_idx + 1 < len(row) else ""
+    
+    # Умный поиск аудитории: если в колонке аудитории группы пусто,
+    # ищем ближайшую заполненную ячейку справа (для общих лекций и конф-залов)
+    aud = None
+    for col_idx in range(group_col_idx + 1, min(group_col_idx + 4, len(row))):
+      val = row.iloc[col_idx]
+      if pd.notna(val) and str(val).strip() != "":
+        aud = str(val).strip()
+        break
+    
+    if not aud:
+      aud = "—"
 
     if pd.notna(pair_num) and pd.notna(subject):
       day_key = current_day.lower() if current_day else "other"
@@ -88,7 +110,7 @@ def load_schedule_for_group_5301():
           else ""
       )
       subj_str = str(subject).strip().replace("\n", " ")
-      aud_str = str(aud).strip() if pd.notna(aud) else "—"
+      aud_str = aud
 
       schedule_data[day_key]["lessons"].append({
           "num": pair_num,
@@ -172,6 +194,9 @@ async def handle_docs(message: types.Message):
     file_info = await bot.get_file(document.file_id)
     downloaded_file = await bot.download_file(file_info.file_path)
 
+    global EXCEL_FILE
+    EXCEL_FILE = document.file_name
+
     with open(EXCEL_FILE, "wb") as new_file:
       new_file.write(downloaded_file.read())
 
@@ -236,7 +261,7 @@ async def hide_teachers(callback: types.CallbackQuery):
 
 
 async def main():
-  print("Оптимизированный мобильный бот с веб-сервером запущен!")
+  print("Бот с умным определением аудиторий запущен!")
   await dp.start_polling(bot)
 
 
