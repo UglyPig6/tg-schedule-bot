@@ -1,5 +1,7 @@
 import asyncio
+import http.server
 import os
+import threading
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -11,6 +13,26 @@ EXCEL_FILE = "current_schedule.xlsx"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+
+# --- МИНИ-СЕРВЕР ДЛЯ RENDER (чтобы не было ошибки портов) ---
+class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+
+  def do_GET(self):
+    self.send_response(200)
+    self.end_headers()
+    self.wfile.write(b"Bot is alive!")
+
+
+def run_web_server():
+  port = int(os.getenv("PORT", 10000))
+  server = http.server.HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+  server.serve_forever()
+
+
+# Запускаем веб-сервер в отдельном потоке
+threading.Thread(target=run_web_server, daemon=True).start()
+# -------------------------------------------------------------
 
 
 def load_schedule_for_group_5301():
@@ -57,7 +79,6 @@ def load_schedule_for_group_5301():
             "lessons": [],
         }
 
-      # Заменяем точки на двоеточие во времени (например, 14.45-16.05 -> 14:45-16:05)
       time_str = (
           str(time_val)
           .strip()
@@ -72,7 +93,7 @@ def load_schedule_for_group_5301():
       schedule_data[day_key]["lessons"].append({
           "num": pair_num,
           "time": time_str,
-          "subject": subj_str,  # Полное название предмета и тип занятия
+          "subject": subj_str,
           "aud": aud_str,
       })
 
@@ -93,16 +114,14 @@ def build_keyboard(active_day="понедельник", show_teachers=False):
   builder = InlineKeyboardBuilder()
   SCHEDULE = load_schedule_for_group_5301()
 
-  # Кнопки выбора дней недели
   for code, label, _ in DAYS_ORDER:
     if code in SCHEDULE:
       if code == active_day:
         builder.button(text=f"📌 {label} (Выбран)", callback_data=f"day_{code}")
       else:
         builder.button(text=label, callback_data=f"day_{code}")
-  builder.adjust(3, 3)  # По 3 кнопки в ряду
+  builder.adjust(3, 3)
 
-  # Кнопка преподавателей
   if active_day in SCHEDULE:
     if show_teachers:
       builder.button(
@@ -119,7 +138,6 @@ def build_keyboard(active_day="понедельник", show_teachers=False):
 
 
 def format_single_day_message(active_day="понедельник", show_teachers=False):
-  """Формирует сообщение ТОЛЬКО для выбранного дня (без лишних дней)."""
   SCHEDULE = load_schedule_for_group_5301()
 
   if active_day not in SCHEDULE:
@@ -132,7 +150,6 @@ def format_single_day_message(active_day="понедельник", show_teachers
       f"────────────────────────\n"
   )
 
-  # Список пар (вертикальный формат — идеально для телефона, ничего не режется)
   for item in day_info["lessons"]:
     text += (
         f"🔹 **{item['num']} пара** (`{item['time']}`)\n"
@@ -148,7 +165,6 @@ def format_single_day_message(active_day="понедельник", show_teachers
   return text
 
 
-# Автоматический перехват файлов из чата группы или ЛС
 @dp.message(F.document)
 async def handle_docs(message: types.Message):
   document = message.document
@@ -171,7 +187,6 @@ async def handle_docs(message: types.Message):
 
 @dp.message(Command("start", "schedule"))
 async def cmd_start(message: types.Message):
-  # По умолчанию при старте показываем понедельник
   text = format_single_day_message(
       active_day="понедельник", show_teachers=False
   )
@@ -221,7 +236,7 @@ async def hide_teachers(callback: types.CallbackQuery):
 
 
 async def main():
-  print("Оптимизированный мобильный бот запущен!")
+  print("Оптимизированный мобильный бот с веб-сервером запущен!")
   await dp.start_polling(bot)
 
 
