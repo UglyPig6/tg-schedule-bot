@@ -11,21 +11,7 @@ import pandas as pd
 TOKEN = os.getenv("BOT_TOKEN")
 
 
-def find_excel_file():
-  """Автоматически находит файл расписания .xlsx в папке."""
-  for f in os.listdir("."):
-    if f.endswith(".xlsx") and not f.startswith("~$"):
-      return f
-  return "current_schedule.xlsx"
-
-
-EXCEL_FILE = find_excel_file()
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-
-# --- МИНИ-СЕРВЕР ДЛЯ RENDER (чтобы не было ошибки портов) ---
+# --- МИНИ-СЕРВЕР ДЛЯ RENDER (чтобы бесплатный тариф работал без ошибок) ---
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
 
   def do_GET(self):
@@ -42,7 +28,21 @@ def run_web_server():
 
 # Запускаем веб-сервер в отдельном потоке
 threading.Thread(target=run_web_server, daemon=True).start()
-# -------------------------------------------------------------
+# -----------------------------------------------------------------------
+
+
+def find_excel_file():
+  """Автоматически находит файл расписания .xlsx в папке."""
+  for f in os.listdir("."):
+    if f.endswith(".xlsx") and not f.startswith("~$"):
+      return f
+  return "current_schedule.xlsx"
+
+
+EXCEL_FILE = find_excel_file()
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
 
 def load_schedule_for_group_5301():
@@ -79,16 +79,15 @@ def load_schedule_for_group_5301():
       current_day = str(day_val).strip()
 
     subject = row.iloc[group_col_idx]
-    
-    # Умный поиск аудитории: если в колонке аудитории группы пусто,
-    # ищем ближайшую заполненную ячейку справа (для общих лекций и конф-залов)
+
+    # Умный поиск аудитории (для общих пар, конф-залов и т.д.)
     aud = None
     for col_idx in range(group_col_idx + 1, min(group_col_idx + 4, len(row))):
       val = row.iloc[col_idx]
       if pd.notna(val) and str(val).strip() != "":
         aud = str(val).strip()
         break
-    
+
     if not aud:
       aud = "—"
 
@@ -110,13 +109,12 @@ def load_schedule_for_group_5301():
           else ""
       )
       subj_str = str(subject).strip().replace("\n", " ")
-      aud_str = aud
 
       schedule_data[day_key]["lessons"].append({
           "num": pair_num,
           "time": time_str,
           "subject": subj_str,
-          "aud": aud_str,
+          "aud": aud,
       })
 
   return schedule_data
@@ -261,7 +259,7 @@ async def hide_teachers(callback: types.CallbackQuery):
 
 
 async def main():
-  print("Бот с умным определением аудиторий запущен!")
+  print("Бесплатный облачный бот запущен!")
   await dp.start_polling(bot)
 
 
